@@ -216,37 +216,16 @@ action:
             beats_per_measure: !input beats_per_measure
             sound: !input click_sound
             accent_enabled: !input accent_enabled
-            double_tap_window_ms: !input double_tap_window_ms
             measure_mode_timeout_s: !input measure_mode_timeout_s
 
     # ---- DOUBLE-PRESS: enter beats-per-measure adjustment mode -------------
-    #
-    # The integration exposes `ha_metronome.press` (which implements double-tap timing),
-    # but does not expose a dedicated "enter measure mode" service.
-    # To handle a device-provided double-press event, we call `press` twice back-to-back;
-    # the second call lands within the double-tap window and the component will switch modes.
     - conditions:
         - condition: template
           value_template: >
             {{ trigger.event.data.get('command') | string | lower == 'remote_button_double_press' }}
       sequence:
-        - service: ha_metronome.press
+        - service: ha_metronome.enter_measure_mode
           data:
-            media_player: !input media_player
-            bpm: !input initial_bpm
-            beats_per_measure: !input beats_per_measure
-            sound: !input click_sound
-            accent_enabled: !input accent_enabled
-            double_tap_window_ms: !input double_tap_window_ms
-            measure_mode_timeout_s: !input measure_mode_timeout_s
-        - service: ha_metronome.press
-          data:
-            media_player: !input media_player
-            bpm: !input initial_bpm
-            beats_per_measure: !input beats_per_measure
-            sound: !input click_sound
-            accent_enabled: !input accent_enabled
-            double_tap_window_ms: !input double_tap_window_ms
             measure_mode_timeout_s: !input measure_mode_timeout_s
 
     # ---- ROTATE: `left` / `right` ----------------------------------------

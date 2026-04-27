@@ -81,7 +81,6 @@ from .const import (
     ATTR_BPM_STEP,
     ATTR_DELTA,
     ATTR_DIRECTION,
-    ATTR_DOUBLE_TAP_WINDOW_MS,
     ATTR_MEASURE_MODE_TIMEOUT_S,
     ATTR_MEDIA_PLAYER,
     ATTR_SOUND,
@@ -90,7 +89,6 @@ from .const import (
     CHANNELS,
     DEFAULT_BPM,
     DEFAULT_BPM_STEP,
-    DEFAULT_DOUBLE_TAP_WINDOW_MS,
     DEFAULT_MEASURE_MODE_TIMEOUT_S,
     DEFAULT_SOUND,
     DEFAULT_SOUNDS_SUBDIR,
@@ -103,6 +101,7 @@ from .const import (
     MODE_NORMAL,
     SAMPLE_RATE,
     SERVICE_ADJUST_BPM,
+    SERVICE_ENTER_MEASURE_MODE,
     SERVICE_PLAY_ON,
     SERVICE_PRESS,
     SERVICE_ROTATE,
@@ -243,12 +242,6 @@ class MetronomeState:
         # Interaction mode
         self.mode: str = MODE_NORMAL
         self._measure_exit_handle: Optional[asyncio.TimerHandle] = None
-
-        # Double-tap tracking
-        self._last_press_time: float = 0.0
-        self._pending_single_tap: Optional[asyncio.TimerHandle] = None
-        # Defaults — overridable per press/rotate call
-        self.double_tap_window: float = DEFAULT_DOUBLE_TAP_WINDOW_MS / 1000
         self.measure_timeout: float = DEFAULT_MEASURE_MODE_TIMEOUT_S
 
         # Sounds
@@ -357,10 +350,7 @@ class MetronomeState:
             self._measure_exit_handle = None
 
     def cancel_interaction_timers(self) -> None:
-        """Cancel pending single-tap and measure-mode timers (reload/shutdown)."""
-        if self._pending_single_tap is not None:
-            self._pending_single_tap.cancel()
-            self._pending_single_tap = None
+        """Cancel any loop timers (reload/shutdown)."""
         self._cancel_measure_timer()
         if self.mode == MODE_ADJUST_MEASURE:
             self.mode = MODE_NORMAL
@@ -566,9 +556,11 @@ async def async_setup_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
     # ----------------------------------------------------------------
     # Service: press
     #
-    # Single-tap: toggle start / stop
-    # Double-tap: enter beats-per-measure adjustment mode
-    #             (any subsequent press exits it immediately)
+    # Press: toggle start / stop immediately
+    #
+    # Note: some earlier versions implemented "double-tap to enter measure mode"
+    # here. Modern ZHA knobs typically provide an explicit double-press command,
+    # so measure mode is now entered via a dedicated service.
     # ----------------------------------------------------------------
 
     async def handle_press(call: ServiceCall) -> None:
@@ -578,51 +570,27 @@ async def async_setup_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
         beats           = call.data.get(ATTR_BEATS_PER_MEASURE)
         sound           = call.data.get(ATTR_SOUND)
         accent_enabled  = call.data.get(ATTR_ACCENT_ENABLED)
-        dtw = call.data.get(ATTR_DOUBLE_TAP_WINDOW_MS, DEFAULT_DOUBLE_TAP_WINDOW_MS) / 1000
-        mto = call.data.get(ATTR_MEASURE_MODE_TIMEOUT_S, DEFAULT_MEASURE_MODE_TIMEOUT_S)
+        # measure_mode_timeout_s is accepted for backwards compatibility but not used here.
 
-        # --- If we're already in measure-adjustment mode, any press exits it ---
-        if state.mode == MODE_ADJUST_MEASURE:
-            _on_measure_mode_exit()
-            return
+        if state.playing:
+            await _do_stop(media_player)
+        else:
+            await _do_start(
+                media_player,
+                bpm,
+                beats,
+                sound,
+                accent_enabled,
+                apply_startup_overrides=True,
+            )
 
-        # --- Double-tap detection ---
-        now = hass.loop.time()
-        is_double = (now - state._last_press_time) < dtw
-        state._last_press_time = now
-
-        if is_double:
-            # Cancel any pending single-tap action
-            if state._pending_single_tap is not None:
-                state._pending_single_tap.cancel()
-                state._pending_single_tap = None
-            # Enter measure-adjustment mode
-            state.enter_measure_mode(mto, hass.loop, _on_measure_mode_exit)
+    async def handle_enter_measure_mode(call: ServiceCall) -> None:
+        timeout = float(
+            call.data.get(ATTR_MEASURE_MODE_TIMEOUT_S, DEFAULT_MEASURE_MODE_TIMEOUT_S)
+        )
+        if state.mode != MODE_ADJUST_MEASURE:
+            state.enter_measure_mode(timeout, hass.loop, _on_measure_mode_exit)
             _publish_state()
-            return
-
-        # --- Schedule single-tap action (delayed so double-tap can cancel it) ---
-        if state._pending_single_tap is not None:
-            state._pending_single_tap.cancel()
-            state._pending_single_tap = None
-
-        def _fire_single_tap():
-            state._pending_single_tap = None
-            if state.playing:
-                hass.async_create_task(_do_stop(media_player))
-            else:
-                hass.async_create_task(
-                    _do_start(
-                        media_player,
-                        bpm,
-                        beats,
-                        sound,
-                        accent_enabled,
-                        apply_startup_overrides=True,
-                    )
-                )
-
-        state._pending_single_tap = hass.loop.call_later(dtw, _fire_single_tap)
 
     # ----------------------------------------------------------------
     # Service: rotate
@@ -747,8 +715,15 @@ async def async_setup_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
             vol.Optional(ATTR_BEATS_PER_MEASURE): vol.All(vol.Coerce(int), vol.Range(1, 16)),
             vol.Optional(ATTR_SOUND): cv.string,
             vol.Optional(ATTR_ACCENT_ENABLED): _bool,
-            vol.Optional(ATTR_DOUBLE_TAP_WINDOW_MS): vol.All(vol.Coerce(float), vol.Range(100, 1000)),
             vol.Optional(ATTR_MEASURE_MODE_TIMEOUT_S): vol.All(vol.Coerce(float), vol.Range(2, 30)),
+        }),
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_ENTER_MEASURE_MODE, handle_enter_measure_mode,
+        schema=vol.Schema({
+            vol.Optional(ATTR_MEASURE_MODE_TIMEOUT_S, default=DEFAULT_MEASURE_MODE_TIMEOUT_S): vol.All(
+                vol.Coerce(float), vol.Range(2, 30)
+            ),
         }),
     )
     hass.services.async_register(

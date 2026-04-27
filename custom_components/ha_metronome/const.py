@@ -39,7 +39,8 @@ SERVICE_ADJUST_BPM = "adjust_bpm"
 SERVICE_PLAY_ON = "play_on"
 SERVICE_SET_SOUND = "set_sound"
 # Knob-oriented services (used by blueprint)
-SERVICE_PRESS = "press"     # handles single/double-tap internally
+SERVICE_PRESS = "press"     # toggles start/stop immediately
+SERVICE_ENTER_MEASURE_MODE = "enter_measure_mode"
 SERVICE_ROTATE = "rotate"   # adjusts BPM or beats depending on mode
 
 # Service data keys

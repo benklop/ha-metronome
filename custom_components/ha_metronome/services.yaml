@@ -101,7 +101,7 @@ play_on:
 
 press:
   name: Press (knob)
-  description: Handle a physical or virtual press. Single-tap toggles start/stop after the double-tap window; a second tap in that window enters beats-per-measure mode. In that mode, the next press exits.
+  description: Handle a physical or virtual press. Toggles start/stop immediately. (Measure mode is entered via the enter_measure_mode service.)
   fields:
     media_player:
       name: Media player
@@ -138,19 +138,9 @@ press:
       required: false
       selector:
         boolean:
-    double_tap_window_ms:
-      name: Double-tap window
-      description: If a second press arrives within this many milliseconds, it counts as a double-tap (enter measure mode).
-      required: false
-      selector:
-        number:
-          min: 100
-          max: 1000
-          step: 10
-          unit_of_measurement: ms
     measure_mode_timeout_s:
       name: Measure mode timeout
-      description: In beats-per-measure mode, exit automatically after this many seconds without rotation.
+      description: Accepted for compatibility. Use enter_measure_mode to control measure mode.
       required: false
       selector:
         number:
@@ -188,6 +178,21 @@ rotate:
       name: Measure mode timeout
       description: When already in measure mode, this value is used if you want to change the inactivity period (seconds).
       required: false
+      selector:
+        number:
+          min: 2
+          max: 30
+          step: 1
+          unit_of_measurement: s
+
+enter_measure_mode:
+  name: Enter beats-per-measure mode
+  description: Switch the metronome into beats-per-measure adjustment mode (rotation changes beats per measure). Exits automatically after the timeout.
+  fields:
+    measure_mode_timeout_s:
+      name: Measure mode timeout
+      required: false
+      default: 5
       selector:
         number:
           min: 2
