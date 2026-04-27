@@ -160,10 +160,8 @@ rotate:
       selector:
         select:
           options:
-            - value: "1"
-              label: Clockwise (increase)
-            - value: "-1"
-              label: Counter-clockwise (decrease)
+            - "1"
+            - "-1"
     bpm_step:
       name: BPM per step
       description: BPM change per rotation when in normal mode.
