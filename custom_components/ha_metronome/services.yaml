@@ -160,9 +160,9 @@ rotate:
       selector:
         select:
           options:
-            - value: 1
+            - value: "1"
               label: Clockwise (increase)
-            - value: -1
+            - value: "-1"
               label: Counter-clockwise (decrease)
     bpm_step:
       name: BPM per step
