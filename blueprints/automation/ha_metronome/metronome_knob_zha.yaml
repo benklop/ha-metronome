@@ -39,20 +39,18 @@ blueprint:
 
     **Reference trace** in this repository: `zha_event.yaml` — on one detent, `left` and `rotate_type` (OnOff, cluster 6) arrive in the same millisecond, then `step` (Level, cluster 8) about **0.25s later**. Enable only **one** of the three; use `left`/`right` or `rotate_type` for snappy control, or `step` alone if you want a single level-cluster event (slight lag).
 
-    **Trigger field: `device_ieee` (Zigbee IEEE), not only the registry `device_id`**  
-    ZHA’s own device automations match `zha_event` using the device’s **IEEE** address. This blueprint does the same: the trigger uses `device_ieee` so it stays consistent with what ZHA emits. Copy the value from any `zha_event` (or from this repo’s `zha_event.yaml`) — same format as in the log (lowercase hex, colons).
+    **Automation trace (press vs rotate)**  
+    If the **trace shows the trigger** on turn but no **rotate** action, the event reached Home Assistant: turn on **log unmatched events** and check the logged `command` — you likely need a different **React to step / left&right / rotate_type** combination. If the trace shows **no trigger at all** for turns (but you see `zha_event` in Developer Tools), the event’s `device_id` may not match the **selected device**; compare the `device_id` string in a raw `zha_event` to the device’s id in **Settings → Devices** (or try re-selecting the device in the automation).
 
   domain: automation
 
   input:
-    zha_device_ieee:
-      name: Zigbee device IEEE
-      description: >
-        Hardware address used in `zha_event` (field `device_ieee`). Paste from Developer Tools → Events
-        when listening to `zha_event`, or from the device / `zha_event.yaml`. Example: a4:c1:38:48:77:3e:71:6e
-      default: ""
+    knob_device:
+      name: Knob (ZHA device)
+      description: Select your rotary knob. The trigger matches `zha_event` for this device id.
       selector:
-        text:
+        device:
+          integration: zha
 
     media_player:
       name: Media Player
@@ -288,19 +286,28 @@ blueprint:
       selector:
         boolean:
 
+    log_unmatched_zha:
+      name: Log unmatched `zha_event` (debug)
+      description: >
+        When a `zha_event` matches this device but is not a press and does not match any “React to”
+        rotation option, log the `command` to the logbook. Use this to see why rotation is skipped
+        in the automation trace.
+      default: false
+      selector:
+        boolean:
+
 # ---------------------------------------------------------------------------
 # Triggers
 # ---------------------------------------------------------------------------
-# One trigger: every `zha_event` for this Zigbee node. ZHA’s device automation layer matches
-# `device_ieee` (not only registry `device_id`); that avoids silent mismatch with the device picker.
-# Which commands call rotate is gated in `action` by the react_to_* inputs.
+# Every `zha_event` for the selected ZHA device (registry device id, same as `device_id` in the event).
+# Which commands run press vs rotate is decided in `action` and the react_to_* / log options.
 # ---------------------------------------------------------------------------
 trigger:
   - id: zha_knob
     platform: event
     event_type: zha_event
     event_data:
-      device_ieee: !input zha_device_ieee
+      device_id: !input knob_device
 
 # ---------------------------------------------------------------------------
 # Variables
@@ -315,6 +322,7 @@ variables:
   react_to_step: !input react_to_step
   react_to_lr: !input react_to_left_right
   react_to_rt: !input react_to_rotate_type
+  log_unmatched: !input log_unmatched_zha
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -396,18 +404,30 @@ action:
       sequence:
         - variables:
             step_mode_raw: >-
-              {{ trigger.event.data.params.step_mode
-                 | default(trigger.event.data.params.move_mode,  true)
-                 | default(trigger.event.data.step_mode,         true)
-                 | default(trigger.event.data.move_mode,         true)
-                 | default(0) | int }}
+              {% set p = trigger.event.data.get('params') or {} %}
+              {{ (p.get('step_mode', p.get('move_mode',
+                  trigger.event.data.get('step_mode', trigger.event.data.get('move_mode', 0)))))
+                 | int(0) }}
             direction: >-
-              {{ 1 if step_mode_raw == (cw_mode | int) else -1 }}
+              {{ 1 if step_mode_raw | int(0) == (cw_mode | int) else -1 }}
         - service: ha_metronome.rotate
           data:
             direction: "{{ direction }}"
             bpm_step: !input bpm_step
             measure_mode_timeout_s: !input measure_mode_timeout_s
+
+    - default:
+        - service: logbook.log
+          enabled: >
+            {{ log_unmatched
+               and (trigger.event.data.get('command') | string | lower)
+                  != (press_cmd | string | lower) }}
+          data:
+            name: "Metronome ZHA knob (unmatched)"
+            message: >
+              {{ 'Unmatched zha_event — check React to step / left&right / rotate_type. command='
+                 ~ (trigger.event.data.get('command')|string) ~ ' params='
+                 ~ (trigger.event.data.get('params')|string) }}
 
 # queued so rapid rotation events don't get dropped
 mode: queued

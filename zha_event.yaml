@@ -11,8 +11,9 @@
 # (IDs / IEEE in this file are from a real device; replace with your own when testing.)
 #
 # If you get no `zha_event` when rotating, see "Troubleshooting" (README) and
-# `examples/diagnostics_zha_knob_event.yaml`. The metronome blueprint trigger matches
-# `device_ieee` (field below), same as ZHA’s built-in device automations.
+# `examples/diagnostics_zha_knob_event.yaml`. The metronome blueprint subscribes by the
+# **device** you select; `device_id` below should match that device in Settings → Devices.
+# `device_ieee` is also in every event and is what the diagnostic example uses.
 #---------------------------------------------------------------------------------------------------
 # --- 1) left (earliest) ---------------------------------------------------------------------------
 event_type: zha_event
@@ -75,5 +76,102 @@ origin: LOCAL
 time_fired: "2026-04-27T18:08:23.041687+00:00"
 context:
   id: 01KQ821JG1TJ17Q2HB191HHFSE
+  parent_id: null
+  user_id: null
+
+
+#------------------------------------------------------------------------------------------------
+# Press events
+event_type: zha_event
+data:
+  device_ieee: a4:c1:38:48:77:3e:71:6e
+  device_id: 787ff31c162df06b3bceb38f2b0fbfe0
+  unique_id: a4:c1:38:48:77:3e:71:6e:1:0x0006
+  endpoint_id: 1
+  cluster_id: 6
+  command: remote_button_short_press
+  args: []
+  params: {}
+origin: LOCAL
+time_fired: "2026-04-27T18:26:32.008954+00:00"
+context:
+  id: 01KQ832SY8TSKYPA5BA4BZBH8B
+  parent_id: null
+  user_id: null
+#------------------------------------------------------------------------------------------------
+event_type: zha_event
+data:
+  device_ieee: a4:c1:38:48:77:3e:71:6e
+  device_id: 787ff31c162df06b3bceb38f2b0fbfe0
+  unique_id: a4:c1:38:48:77:3e:71:6e:1:0x0006
+  endpoint_id: 1
+  cluster_id: 6
+  command: press_type
+  args:
+    - 0
+  params:
+    press_type: 0
+origin: LOCAL
+time_fired: "2026-04-27T18:26:32.009161+00:00"
+context:
+  id: 01KQ832SY9ZMMJ33YXA01008G4
+  parent_id: null
+  user_id: null
+#------------------------------------------------------------------------------------------------
+event_type: zha_event
+data:
+  device_ieee: a4:c1:38:48:77:3e:71:6e
+  device_id: 787ff31c162df06b3bceb38f2b0fbfe0
+  unique_id: a4:c1:38:48:77:3e:71:6e:1:0x0006
+  endpoint_id: 1
+  cluster_id: 6
+  command: attribute_updated
+  args:
+    attribute_id: 0
+    attribute_name: on_off
+    value: true
+  params: {}
+origin: LOCAL
+time_fired: "2026-04-27T18:26:32.261154+00:00"
+context:
+  id: 01KQ832T65KWFSQRA8WQG18HBG
+  parent_id: null
+  user_id: null
+#------------------------------------------------------------------------------------------------
+event_type: zha_event
+data:
+  device_ieee: a4:c1:38:48:77:3e:71:6e
+  device_id: 787ff31c162df06b3bceb38f2b0fbfe0
+  unique_id: a4:c1:38:48:77:3e:71:6e:1:0x0006
+  endpoint_id: 1
+  cluster_id: 6
+  command: attribute_updated
+  args:
+    attribute_id: 0
+    attribute_name: on_off
+    attribute_value: true
+    value: true
+  params: {}
+origin: LOCAL
+time_fired: "2026-04-27T18:26:32.261365+00:00"
+context:
+  id: 01KQ832T65JMJ5B5ZBYFPDJ39E
+  parent_id: null
+  user_id: null
+#------------------------------------------------------------------------------------------------
+event_type: zha_event
+data:
+  device_ieee: a4:c1:38:48:77:3e:71:6e
+  device_id: 787ff31c162df06b3bceb38f2b0fbfe0
+  unique_id: a4:c1:38:48:77:3e:71:6e:1:0x0006
+  endpoint_id: 1
+  cluster_id: 6
+  command: toggle
+  args: []
+  params: {}
+origin: LOCAL
+time_fired: "2026-04-27T18:26:32.261492+00:00"
+context:
+  id: 01KQ832T65DJ8WT86F0NQ9FAZB
   parent_id: null
   user_id: null
