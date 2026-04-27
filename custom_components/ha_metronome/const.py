@@ -2,6 +2,9 @@
 
 DOMAIN = "ha_metronome"
 
+# Display name (config entry title, config flow, UI)
+INTEGRATION_TITLE = "HA Metronome"
+
 # Audio format — must match the sample files
 SAMPLE_RATE = 48000
 CHANNELS = 2               # stereo
@@ -56,6 +59,8 @@ STATE_ENTITY_ID = f"{DOMAIN}.metronome"
 
 # hass.data key: unsub callback for EVENT_HOMEASSISTANT_STOP (timer safety on shutdown)
 KEY_STOP_UNSUB = f"{DOMAIN}_stop_unsub"
+# Set once we register the stream URL (avoids duplicate register_view on Config Entry reload)
+KEY_HTTP_VIEW_REGISTERED = f"{DOMAIN}_view_registered"
 
 # HTTP stream path
 STREAM_PATH = f"/api/{DOMAIN}/stream"

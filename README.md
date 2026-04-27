@@ -18,13 +18,24 @@ Copy the `custom_components/ha_metronome` folder into your configuration directo
 
 Restart Home Assistant.
 
-## Configuration
+## UI configuration (recommended)
 
-Add an empty key so Home Assistant loads the integration:
+1. Open **Settings** → **Devices & services** → **Add integration** (or **Integrations** in older UI).
+2. Search for **HA Metronome** and complete the short form (a single page with **Submit**).
+
+You can remove a legacy empty `ha_metronome:` block from `configuration.yaml` if you add the integration this way. If you still have that block, Home Assistant will import a config entry for you on restart so the integration appears under **Settings** without a second step.
+
+## Optional YAML (legacy / import)
+
+If you have not used the UI yet, you can still use an empty key so a config entry is created from YAML on the next restart:
 
 ```yaml
 ha_metronome:
 ```
+
+You do not need this once the integration is added in the UI.
+
+## Click samples
 
 Copy [WAV click samples](https://github.com/benklop/ha-metronome/tree/main/sounds/Metronomes) into your config: `config/sounds/Metronomes/` (`*_hi.wav` / `*_lo.wav` pairs). If no samples are found, the integration falls back to simple synthesised clicks.
 

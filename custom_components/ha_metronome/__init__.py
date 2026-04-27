@@ -64,7 +64,9 @@ from typing import Optional
 import voluptuous as vol
 from aiohttp import web
 
+from homeassistant import config_entries
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
@@ -93,6 +95,7 @@ from .const import (
     DEFAULT_SOUNDS_SUBDIR,
     DOMAIN,
     KEY_STOP_UNSUB,
+    KEY_HTTP_VIEW_REGISTERED,
     MAX_BPM,
     MIN_BPM,
     MODE_ADJUST_MEASURE,
@@ -331,8 +334,8 @@ class MetronomeStreamView(HomeAssistantView):
     name = f"api:{DOMAIN}:stream"
     requires_auth = False
 
-    def __init__(self, state: MetronomeState) -> None:
-        self._state = state
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
 
     async def get(self, request: web.Request) -> web.StreamResponse:
         _LOGGER.debug("Stream connection from %s", request.remote)
@@ -357,11 +360,11 @@ class MetronomeStreamView(HomeAssistantView):
         return response
 
     async def _generate_audio(self):
-        state = self._state
         silence_block = bytes(SAMPLE_RATE // 10 * BYTES_PER_FRAME)  # 100 ms
 
         while True:
-            if not state.playing:
+            state: MetronomeState | None = self.hass.data.get(DOMAIN)
+            if state is None or not state.playing:
                 yield silence_block
                 await asyncio.sleep(0.05)
                 continue
@@ -386,7 +389,22 @@ class MetronomeStreamView(HomeAssistantView):
 # ---------------------------------------------------------------------------
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up the HA Metronome integration."""
+    """Load integration (HTTP view once) and import config entry for legacy yaml."""
+
+    if not hass.data.get(KEY_HTTP_VIEW_REGISTERED):
+        hass.http.register_view(MetronomeStreamView(hass))
+        hass.data[KEY_HTTP_VIEW_REGISTERED] = True
+    if DOMAIN in config and not hass.config_entries.async_entries(DOMAIN):
+        hass.async_create_task(
+            hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": config_entries.SOURCE_IMPORT}
+            )
+        )
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
+    """Set up runtime state, services, and the metronome state entity from a config entry."""
 
     sounds_dir = hass.config.path(DEFAULT_SOUNDS_SUBDIR)
     available_sounds = await hass.async_add_executor_job(_discover_sounds, sounds_dir)
@@ -412,7 +430,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         state = MetronomeState(sounds_dir, default, available_sounds)
 
     hass.data[DOMAIN] = state
-    hass.http.register_view(MetronomeStreamView(state))
 
     try:
         base_url = get_url(hass, allow_internal=True, allow_external=False, allow_ip=True)
@@ -689,8 +706,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
-async def async_unload(hass: HomeAssistant) -> bool:
-    """Tear down services, state, and any pending loop timers (reload or shutdown)."""
+async def async_unload_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
+    """Tear down this config entry: services, state, and any pending loop timers."""
 
     if unsub := hass.data.pop(KEY_STOP_UNSUB, None):
         unsub()
