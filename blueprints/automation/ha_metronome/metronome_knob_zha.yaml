@@ -1,0 +1,294 @@
+blueprint:
+  name: "Metronome — ZHA Knob Controller"
+  description: >
+    Control the HA Metronome custom component with a ZHA rotary knob.
+
+    **Press once** — start or stop the metronome.
+    When starting, the click-track stream is sent to the chosen media player.
+
+    **Double-press** — enter beats-per-measure adjustment mode.
+    The metronome keeps playing; rotating now changes beats per measure instead
+    of tempo.  The mode exits automatically after a configurable timeout, or
+    immediately on the next press.
+
+    **Rotate** — adjust tempo (normal mode) or beats per measure (adjustment mode).
+
+    Tap/mode logic lives inside the `ha_metronome` custom component, so the
+    automation just routes events — no timing hacks in YAML.
+
+    ---
+    **Finding your knob's ZHA command names**
+
+    Open **Developer Tools → Events**, start listening for `zha_event`, then
+    press and turn your knob.  Note the `command` field values.
+
+    | Knob type                | Press command | Rotate command     | Direction field     |
+    |--------------------------|---------------|--------------------|---------------------|
+    | IKEA Symfonisk / Tradfri | `toggle`      | `step`             | `step_mode` 0/1     |
+    | IKEA Tradfri dimmer      | `toggle`      | `move_with_on_off` | `move_mode` 0/1     |
+    | Aqara rotary encoder T1  | `toggle`      | `step`             | `step_mode` 0/1     |
+    | Generic ZHA level knob   | `toggle`      | `step`             | `step_mode` 0/1     |
+
+    Clockwise = `step_mode 0` (increase).  Counter-clockwise = `step_mode 1` (decrease).
+
+  domain: automation
+
+  input:
+    knob_device:
+      name: Knob Device (ZHA)
+      selector:
+        device:
+          integration: zha
+
+    media_player:
+      name: Media Player
+      description: Speaker to stream the click track to.
+      selector:
+        entity:
+          domain: media_player
+
+    initial_bpm:
+      name: Initial BPM
+      description: Tempo used each time the metronome (re)starts.
+      default: 120
+      selector:
+        number:
+          min: 20
+          max: 300
+          step: 1
+          unit_of_measurement: BPM
+          mode: slider
+
+    beats_per_measure:
+      name: Initial beats per measure
+      description: Starting value; can be changed later via double-tap.
+      default: 4
+      selector:
+        number:
+          min: 1
+          max: 16
+          step: 1
+          mode: box
+
+    click_sound:
+      name: Click sound
+      description: Sound set to use (without _hi/_lo.wav suffix).
+      default: "Perc_MetronomeQuartz"
+      selector:
+        select:
+          options:
+            - "Perc_Can"
+            - "Perc_Castanet"
+            - "Perc_Chair"
+            - "Perc_Clackhead"
+            - "Perc_Clap"
+            - "Perc_ClickToy"
+            - "Perc_Glass"
+            - "Perc_HeadKnock"
+            - "Perc_Keyboard"
+            - "Perc_Metal"
+            - "Perc_MetronomeQuartz"
+            - "Perc_MouthPop"
+            - "Perc_MusicStand"
+            - "Perc_PracticePad"
+            - "Perc_Snap"
+            - "Perc_Squeak"
+            - "Perc_Stick"
+            - "Perc_Tamb_A"
+            - "Perc_Tamb_B"
+            - "Perc_Tamb_C"
+            - "Perc_Tamb_D"
+            - "Perc_Teeth"
+            - "Perc_Tongue"
+            - "Perc_TrashCan"
+            - "Perc_WhistleParty"
+            - "Perc_WhistleRef"
+            - "Synth_Bell_A"
+            - "Synth_Bell_B"
+            - "Synth_Block_A"
+            - "Synth_Block_B"
+            - "Synth_Block_C"
+            - "Synth_Block_D"
+            - "Synth_Block_E"
+            - "Synth_Block_F"
+            - "Synth_Block_G"
+            - "Synth_Block_H"
+            - "Synth_Sine_A"
+            - "Synth_Sine_B"
+            - "Synth_Sine_C"
+            - "Synth_Sine_D"
+            - "Synth_Sine_E"
+            - "Synth_Sine_F"
+            - "Synth_Square_A"
+            - "Synth_Square_B"
+            - "Synth_Square_C"
+            - "Synth_Square_D"
+            - "Synth_Square_E"
+            - "Synth_Tick_A"
+            - "Synth_Tick_B"
+            - "Synth_Tick_C"
+            - "Synth_Tick_D"
+            - "Synth_Tick_E"
+            - "Synth_Tick_F"
+            - "Synth_Tick_G"
+            - "Synth_Tick_H"
+            - "Synth_Weird_A"
+            - "Synth_Weird_B"
+            - "Synth_Weird_C"
+            - "Synth_Weird_D"
+            - "Synth_Weird_E"
+          custom_value: true
+
+    accent_enabled:
+      name: Accent beat 1
+      description: >
+        When enabled, beat 1 of each measure uses the _hi sound (a different tonal
+        recording — sharper transient, distinct character from the regular _lo click).
+        Disable to make every beat identical.
+      default: true
+      selector:
+        boolean:
+
+    bpm_step:
+      name: BPM change per rotation step
+      description: How many BPM to add/subtract per ZHA step event.
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 20
+          step: 1
+          mode: box
+
+    double_tap_window_ms:
+      name: Double-tap window (ms)
+      description: >
+        Maximum gap between two presses to count as a double-tap.
+        Shorter = less chance of accidental double-taps; longer = easier to trigger.
+      default: 400
+      selector:
+        number:
+          min: 150
+          max: 800
+          step: 50
+          unit_of_measurement: ms
+          mode: slider
+
+    measure_mode_timeout_s:
+      name: Beats-per-measure mode timeout (s)
+      description: >
+        Seconds of inactivity before beats-per-measure mode auto-exits.
+      default: 5
+      selector:
+        number:
+          min: 2
+          max: 30
+          step: 1
+          unit_of_measurement: s
+          mode: box
+
+    press_command:
+      name: Knob press command
+      description: ZHA command fired on press.  Usually "toggle".
+      default: "toggle"
+      selector:
+        text:
+
+    rotate_command:
+      name: Rotation command
+      description: ZHA command fired on rotation.  Usually "step".
+      default: "step"
+      selector:
+        text:
+
+    rotate_cw_mode:
+      name: Clockwise direction value
+      description: step_mode value meaning "clockwise / increase".  Usually 0.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 3
+          step: 1
+          mode: box
+
+    rotate_ccw_mode:
+      name: Counter-clockwise direction value
+      description: step_mode value meaning "counter-clockwise / decrease".  Usually 1.
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 3
+          step: 1
+          mode: box
+
+# ---------------------------------------------------------------------------
+# Triggers
+# ---------------------------------------------------------------------------
+trigger:
+  - id: knob_pressed
+    platform: event
+    event_type: zha_event
+    event_data:
+      device_id: !input knob_device
+      command: !input press_command
+
+  - id: knob_rotated
+    platform: event
+    event_type: zha_event
+    event_data:
+      device_id: !input knob_device
+      command: !input rotate_command
+
+# ---------------------------------------------------------------------------
+# Variables
+# ---------------------------------------------------------------------------
+variables:
+  cw_mode: !input rotate_cw_mode
+  ccw_mode: !input rotate_ccw_mode
+
+# ---------------------------------------------------------------------------
+# Actions
+# ---------------------------------------------------------------------------
+action:
+  - choose:
+
+    # ---- PRESS — delegate all tap logic to the component -------------------
+    - conditions:
+        - condition: trigger
+          id: knob_pressed
+      sequence:
+        - service: ha_metronome.press
+          data:
+            media_player: !input media_player
+            bpm: !input initial_bpm
+            beats_per_measure: !input beats_per_measure
+            sound: !input click_sound
+            accent_enabled: !input accent_enabled
+            double_tap_window_ms: !input double_tap_window_ms
+            measure_mode_timeout_s: !input measure_mode_timeout_s
+
+    # ---- ROTATE — determine direction, delegate to component ---------------
+    - conditions:
+        - condition: trigger
+          id: knob_rotated
+      sequence:
+        - variables:
+            step_mode_raw: >-
+              {{ trigger.event.data.params.step_mode
+                 | default(trigger.event.data.params.move_mode,  true)
+                 | default(trigger.event.data.step_mode,         true)
+                 | default(trigger.event.data.move_mode,         true)
+                 | default(0) | int }}
+            direction: >-
+              {{ 1 if step_mode_raw == (cw_mode | int) else -1 }}
+        - service: ha_metronome.rotate
+          data:
+            direction: "{{ direction }}"
+            bpm_step: !input bpm_step
+            measure_mode_timeout_s: !input measure_mode_timeout_s
+
+# queued so rapid rotation events don't get dropped
+mode: queued
+max: 10
