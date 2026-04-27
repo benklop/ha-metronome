@@ -22,14 +22,16 @@ blueprint:
     Open **Developer Tools → Events**, start listening for `zha_event`, then
     press and turn your knob.  Note the `command` field values.
 
-    | Knob type                | Press command | Rotate command     | Direction field     |
-    |--------------------------|---------------|--------------------|---------------------|
-    | IKEA Symfonisk / Tradfri | `toggle`      | `step`             | `step_mode` 0/1     |
-    | IKEA Tradfri dimmer      | `toggle`      | `move_with_on_off` | `move_mode` 0/1     |
-    | Aqara rotary encoder T1  | `toggle`      | `step`             | `step_mode` 0/1     |
-    | Generic ZHA level knob   | `toggle`      | `step`             | `step_mode` 0/1     |
+    | Knob type                 | Press command   | Rotation (ZHA)      | Notes |
+    |---------------------------|-----------------|---------------------|--------|
+    | IKEA Symfonisk / Tradfri  | `toggle`        | `step` + `step_mode` | Default rotate settings. |
+    | IKEA Tradfri dimmer       | `toggle`        | `move_with_on_off`  | Set **Rotation command** to that value; set CW/CCW mode inputs for `move_mode`. |
+    | Tuya / TS004F scene **mode** (many smart scene knobs, e.g. C3006) | `toggle` (dimmer) or `press_type` (scene) | `right` / `left` | In **Scene** (event) mode the quirk often emits `command: right` and `left`, not `step`. This blueprint also listens for those. If press fails, see **Press command** below. |
+    | Tuya / TS004F dimmer **mode** | `toggle`     | `step` + `step_mode` | Same as IKEA if the device is in level/dimmer mode. |
 
-    Clockwise = `step_mode 0` (increase).  Counter-clockwise = `step_mode 1` (decrease).
+    In `step` / level mode: clockwise = `step_mode` 0 (increase) for most devices; the **Clockwise** / **CCW** inputs set which raw value means +1.
+
+    For **Tuya** devices: put the remote in the mode you want (often long-press both buttons, or an attribute, depending on the model) so that rotation shows up as `right`/`left` in **Developer Tools → Events** if `step` never appears.
 
   domain: automation
 
@@ -203,7 +205,9 @@ blueprint:
 
     rotate_cw_mode:
       name: Clockwise direction value
-      description: step_mode value meaning "clockwise / increase".  Usually 0.
+      description: >
+        For `step` / `move_with_on_off` rotation: raw value that means
+        "clockwise / increase" (e.g. step_mode 0). Ignored for Tuya `right` / `left` events.
       default: 0
       selector:
         number:
@@ -214,7 +218,9 @@ blueprint:
 
     rotate_ccw_mode:
       name: Counter-clockwise direction value
-      description: step_mode value meaning "counter-clockwise / decrease".  Usually 1.
+      description: >
+        For `step` / `move_with_on_off` rotation: raw value that means
+        "counter-clockwise / decrease" (e.g. step_mode 1). Ignored for Tuya `right` / `left` events.
       default: 1
       selector:
         number:
@@ -222,6 +228,15 @@ blueprint:
           max: 3
           step: 1
           mode: box
+
+    tuya_invert_left_right:
+      name: Invert Tuya left/right
+      description: >
+        If tempo goes the wrong way when using `right` / `left` `zha_event` commands, enable this
+        to swap the direction. Only affects those events, not `step` rotation.
+      default: false
+      selector:
+        boolean:
 
 # ---------------------------------------------------------------------------
 # Triggers
@@ -234,12 +249,29 @@ trigger:
       device_id: !input knob_device
       command: !input press_command
 
-  - id: knob_rotated
+  # Level / dimmer style (IKEA, Tuya in "command" mode, etc.): usually `command: step`
+  - id: knob_rotate_step
     platform: event
     event_type: zha_event
     event_data:
       device_id: !input knob_device
       command: !input rotate_command
+
+  # Tuya TS004F / many "scene" rotaries (C3006, etc.): in scene/event mode ZHA often emits
+  # `command: right` and `left` on the OnOff cluster, not `step`.
+  - id: knob_rotate_right
+    platform: event
+    event_type: zha_event
+    event_data:
+      device_id: !input knob_device
+      command: "right"
+
+  - id: knob_rotate_left
+    platform: event
+    event_type: zha_event
+    event_data:
+      device_id: !input knob_device
+      command: "left"
 
 # ---------------------------------------------------------------------------
 # Variables
@@ -247,6 +279,7 @@ trigger:
 variables:
   cw_mode: !input rotate_cw_mode
   ccw_mode: !input rotate_ccw_mode
+  tuya_invert: !input tuya_invert_left_right
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -269,10 +302,31 @@ action:
             double_tap_window_ms: !input double_tap_window_ms
             measure_mode_timeout_s: !input measure_mode_timeout_s
 
-    # ---- ROTATE — determine direction, delegate to component ---------------
+    # ---- ROTATE (Tuya / scene mode: `right` / `left` events) -----------------
     - conditions:
         - condition: trigger
-          id: knob_rotated
+          id: knob_rotate_right
+      sequence:
+        - service: ha_metronome.rotate
+          data:
+            direction: "{{ -1 if tuya_invert else 1 }}"
+            bpm_step: !input bpm_step
+            measure_mode_timeout_s: !input measure_mode_timeout_s
+
+    - conditions:
+        - condition: trigger
+          id: knob_rotate_left
+      sequence:
+        - service: ha_metronome.rotate
+          data:
+            direction: "{{ 1 if tuya_invert else -1 }}"
+            bpm_step: !input bpm_step
+            measure_mode_timeout_s: !input measure_mode_timeout_s
+
+    # ---- ROTATE (level / `step` / `move_with_on_off` style) ----------------
+    - conditions:
+        - condition: trigger
+          id: knob_rotate_step
       sequence:
         - variables:
             step_mode_raw: >-
