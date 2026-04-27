@@ -416,18 +416,19 @@ action:
             bpm_step: !input bpm_step
             measure_mode_timeout_s: !input measure_mode_timeout_s
 
-    - default:
-        - service: logbook.log
-          enabled: >
-            {{ log_unmatched
-               and (trigger.event.data.get('command') | string | lower)
-                  != (press_cmd | string | lower) }}
-          data:
-            name: "Metronome ZHA knob (unmatched)"
-            message: >
-              {{ 'Unmatched zha_event — check React to step / left&right / rotate_type. command='
-                 ~ (trigger.event.data.get('command')|string) ~ ' params='
-                 ~ (trigger.event.data.get('params')|string) }}
+    default:
+      - condition: template
+        value_template: >
+          {{ log_unmatched
+             and (trigger.event.data.get('command') | string | lower)
+                != (press_cmd | string | lower) }}
+      - service: logbook.log
+        data:
+          name: "Metronome ZHA knob (unmatched)"
+          message: >
+            {{ 'Unmatched zha_event — check React to step / left&right / rotate_type. command='
+               ~ (trigger.event.data.get('command')|string) ~ ' params='
+               ~ (trigger.event.data.get('params')|string) }}
 
 # queued so rapid rotation events don't get dropped
 mode: queued
