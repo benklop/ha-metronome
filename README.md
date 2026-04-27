@@ -43,6 +43,8 @@ Copy [WAV click samples](https://github.com/benklop/ha-metronome/tree/main/sound
 
 The blueprint at `blueprints/automation/ha_metronome/metronome_knob_zha.yaml` can be copied to `config/blueprints/automation/` and used from the UI, or imported from this repository.
 
+Some Tuya scene knobs (e.g. C3006) send several `zha_event` types per detent; the blueprint has **React to step / left&right / rotate_type** toggles so you only handle one. A chronological example from a real device is in [`zha_event.yaml`](zha_event.yaml) at the repository root.
+
 ## Features (short)
 
 - HTTP WAV stream: `/api/ha_metronome/stream`

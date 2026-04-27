@@ -33,6 +33,12 @@ blueprint:
 
     For **Tuya** devices: put the remote in the mode you want (often long-press both buttons, or an attribute, depending on the model) so that rotation shows up as `right`/`left` in **Developer Tools → Events** if `step` never appears.
 
+    ---
+    **One physical turn, several `zha_event` commands (e.g. Tuya C3006)**  
+    Some knobs report **`step` + `left`/`right` + `rotate_type` for a single detent.** If the blueprint used separate triggers, Home Assistant would call **rotate** once per event (tempo triples). This blueprint uses a **single device trigger** and the options **React to `step` / `left`&`right` / `rotate_type`**: turn off the ones you *don’t* want so only **one** is true.
+
+    **Reference trace** in this repository: `zha_event.yaml` — on one detent, `left` and `rotate_type` (OnOff, cluster 6) arrive in the same millisecond, then `step` (Level, cluster 8) about **0.25s later**. Enable only **one** of the three; use `left`/`right` or `rotate_type` for snappy control, or `step` alone if you want a single level-cluster event (slight lag).
+
   domain: automation
 
   input:
@@ -233,7 +239,45 @@ blueprint:
       name: Invert Tuya left/right
       description: >
         If tempo goes the wrong way when using `right` / `left` `zha_event` commands, enable this
-        to swap the direction. Only affects those events, not `step` rotation.
+        to swap the direction. Only affects `left` / `right`, not `step` or `rotate_type`.
+      default: false
+      selector:
+        boolean:
+
+    invert_rotate_type:
+      name: Invert rotate_type direction
+      description: >
+        If you use `rotate_type` events and tempo moves the wrong way, toggle this. Only applies
+        when "React to rotate_type" is on.
+      default: false
+      selector:
+        boolean:
+
+    react_to_step:
+      name: "React to rotation: step (level) command"
+      description: >
+        Handle `zha_event` with `command` equal to **Rotation command** (default `step`). Set to
+        **off** if your device also fires duplicate `left` / `right` / `rotate_type` for the same
+        turn and you want to use a different option only.
+      default: true
+      selector:
+        boolean:
+
+    react_to_left_right:
+      name: "React to rotation: `left` / `right`"
+      description: >
+        Handle Tuya / scene `command: left` and `right`. Set **off** if you use `rotate_type` or
+        `step` only to avoid double rotation.
+      default: true
+      selector:
+        boolean:
+
+    react_to_rotate_type:
+      name: "React to rotation: `rotate_type`"
+      description: >
+        Handle Tuya `command: rotate_type` (direction often in `params` or `args`). Recommended **on**
+        and the other two rotation toggles **off** on devices that report `step` + `left` + `rotate_type`
+        for one detent, so one turn causes a single `ha_metronome.rotate` call.
       default: false
       selector:
         boolean:
@@ -241,45 +285,29 @@ blueprint:
 # ---------------------------------------------------------------------------
 # Triggers
 # ---------------------------------------------------------------------------
+# One trigger for the whole device: every ZHA event (press + all rotation command variants).
+# Which commands actually call rotate is gated in `action` by the react_to_* inputs.
+# ---------------------------------------------------------------------------
 trigger:
-  - id: knob_pressed
+  - id: zha_knob
     platform: event
     event_type: zha_event
     event_data:
       device_id: !input knob_device
-      command: !input press_command
-
-  # Level / dimmer style (IKEA, Tuya in "command" mode, etc.): usually `command: step`
-  - id: knob_rotate_step
-    platform: event
-    event_type: zha_event
-    event_data:
-      device_id: !input knob_device
-      command: !input rotate_command
-
-  # Tuya TS004F / many "scene" rotaries (C3006, etc.): in scene/event mode ZHA often emits
-  # `command: right` and `left` on the OnOff cluster, not `step`.
-  - id: knob_rotate_right
-    platform: event
-    event_type: zha_event
-    event_data:
-      device_id: !input knob_device
-      command: "right"
-
-  - id: knob_rotate_left
-    platform: event
-    event_type: zha_event
-    event_data:
-      device_id: !input knob_device
-      command: "left"
 
 # ---------------------------------------------------------------------------
 # Variables
 # ---------------------------------------------------------------------------
 variables:
+  press_cmd: !input press_command
+  rot_cmd: !input rotate_command
   cw_mode: !input rotate_cw_mode
   ccw_mode: !input rotate_ccw_mode
   tuya_invert: !input tuya_invert_left_right
+  invert_rt: !input invert_rotate_type
+  react_to_step: !input react_to_step
+  react_to_lr: !input react_to_left_right
+  react_to_rt: !input react_to_rotate_type
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -287,10 +315,12 @@ variables:
 action:
   - choose:
 
-    # ---- PRESS — delegate all tap logic to the component -------------------
+    # ---- PRESS (same `zha_knob` trigger: match command only) ---------------
     - conditions:
-        - condition: trigger
-          id: knob_pressed
+        - condition: template
+          value_template: >
+            {{ trigger.event.data.get('command') | string | lower
+               == (press_cmd | string | lower) }}
       sequence:
         - service: ha_metronome.press
           data:
@@ -302,31 +332,60 @@ action:
             double_tap_window_ms: !input double_tap_window_ms
             measure_mode_timeout_s: !input measure_mode_timeout_s
 
-    # ---- ROTATE (Tuya / scene mode: `right` / `left` events) -----------------
+    # ---- ROTATE: `rotate_type` (Tuya; direction in params/args) -----------
     - conditions:
-        - condition: trigger
-          id: knob_rotate_right
+        - condition: template
+          value_template: >
+            {{ react_to_rt
+               and trigger.event.data.get('command') | string | lower
+               == 'rotate_type' }}
       sequence:
+        - variables:
+            direction: >-
+              {% set p = trigger.event.data.get('params') or {} %}
+              {% set r = p.get('rotate_type') if p is mapping else none %}
+              {% if r is none %}
+                {% set a = trigger.event.data.get('args') or [] %}
+                {% set r = a[0] if a | length > 0 else 0 %}
+              {% endif %}
+              {% set ri = (r|default(0))|int(0) %}
+              {% set base = 1 if ri == 0 else -1 %}
+              {{ -base if invert_rt else base }}
         - service: ha_metronome.rotate
           data:
-            direction: "{{ -1 if tuya_invert else 1 }}"
+            direction: "{{ direction | int(0) }}"
             bpm_step: !input bpm_step
             measure_mode_timeout_s: !input measure_mode_timeout_s
 
+    # ---- ROTATE: Tuya / scene `left` / `right` -------------------------------
     - conditions:
-        - condition: trigger
-          id: knob_rotate_left
+        - condition: template
+          value_template: >
+            {{ react_to_lr
+               and (trigger.event.data.get('command') | string | lower) in
+                   ['left', 'right'] }}
       sequence:
+        - variables:
+            direction: >-
+              {% set c = trigger.event.data.get('command') | string | lower %}
+              {% if c == 'right' %}
+                {{ -1 if tuya_invert else 1 }}
+              {% else %}
+                {{ 1 if tuya_invert else -1 }}
+              {% endif %}
         - service: ha_metronome.rotate
           data:
-            direction: "{{ 1 if tuya_invert else -1 }}"
+            direction: "{{ direction | int(0) }}"
             bpm_step: !input bpm_step
             measure_mode_timeout_s: !input measure_mode_timeout_s
 
-    # ---- ROTATE (level / `step` / `move_with_on_off` style) ----------------
+    # ---- ROTATE: `step` / `move_with_on_off` (level) -------------------------
     - conditions:
-        - condition: trigger
-          id: knob_rotate_step
+        - condition: template
+          value_template: >
+            {{ react_to_step
+               and trigger.event.data.get('command') | string | lower
+               == (rot_cmd | string | lower) }}
       sequence:
         - variables:
             step_mode_raw: >-
