@@ -416,19 +416,28 @@ action:
             bpm_step: !input bpm_step
             measure_mode_timeout_s: !input measure_mode_timeout_s
 
-    default:
-      - condition: template
-        value_template: >
-          {{ log_unmatched
-             and (trigger.event.data.get('command') | string | lower)
-                != (press_cmd | string | lower) }}
-      - service: logbook.log
-        data:
-          name: "Metronome ZHA knob (unmatched)"
-          message: >
-            {{ 'Unmatched zha_event — check React to step / left&right / rotate_type. command='
-               ~ (trigger.event.data.get('command')|string) ~ ' params='
-               ~ (trigger.event.data.get('params')|string) }}
+    # ---- Log unmatched events (explicit branch; avoids choose/default YAML ambiguity)
+    # YAML often parses `default:` under `choose` as a fifth list item `{default: ...}`,
+    # which fails HA validation (`extra keys not allowed @ choose[n]['default']`).
+    - conditions:
+        - condition: template
+          value_template: >
+            {% set cmd = trigger.event.data.get('command') | string | lower %}
+            {% set pc = press_cmd | string | lower %}
+            {% set rc = rot_cmd | string | lower %}
+            {{ log_unmatched
+               and cmd != pc
+               and not (react_to_rt and cmd == 'rotate_type')
+               and not (react_to_lr and cmd in ['left', 'right'])
+               and not (react_to_step and cmd == rc) }}
+      sequence:
+        - service: logbook.log
+          data:
+            name: "Metronome ZHA knob (unmatched)"
+            message: >
+              {{ 'Unmatched zha_event — check React to step / left&right / rotate_type. command='
+                 ~ (trigger.event.data.get('command')|string) ~ ' params='
+                 ~ (trigger.event.data.get('params')|string) }}
 
 # queued so rapid rotation events don't get dropped
 mode: queued
