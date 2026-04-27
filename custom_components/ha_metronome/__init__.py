@@ -58,6 +58,7 @@ import logging
 import math
 import os
 import struct
+import audioop
 import wave as wave_module
 from typing import Optional
 
@@ -142,7 +143,47 @@ def _make_wav_header(
 def _load_wav_pcm(path: str) -> Optional[bytes]:
     try:
         with wave_module.open(path, "rb") as w:
-            return w.readframes(w.getnframes())
+            pcm = w.readframes(w.getnframes())
+            in_rate = int(w.getframerate())
+            in_channels = int(w.getnchannels())
+            in_width = int(w.getsampwidth())
+
+            # Normalize to the stream format we advertise in the WAV header:
+            # 48kHz, stereo, 16-bit signed little-endian PCM.
+            #
+            # Without this, if sample files are e.g. 24kHz, the metronome will
+            # sound at ~2× tempo even though the BPM state is correct.
+            if in_width == 1:
+                # WAV stores 8-bit PCM as unsigned; audioop assumes signed.
+                pcm = audioop.bias(pcm, 1, -128)
+
+            if in_width != 2:
+                pcm = audioop.lin2lin(pcm, in_width, 2)
+                in_width = 2
+
+            if in_rate != SAMPLE_RATE:
+                pcm, _state = audioop.ratecv(
+                    pcm, in_width, in_channels, in_rate, SAMPLE_RATE, None
+                )
+                in_rate = SAMPLE_RATE
+
+            if in_channels != CHANNELS:
+                if in_channels == 1 and CHANNELS == 2:
+                    pcm = audioop.tostereo(pcm, in_width, 1.0, 1.0)
+                    in_channels = 2
+                elif in_channels == 2 and CHANNELS == 1:
+                    pcm = audioop.tomono(pcm, in_width, 0.5, 0.5)
+                    in_channels = 1
+                else:
+                    _LOGGER.warning(
+                        "Unsupported channel conversion %s -> %s for %s",
+                        in_channels,
+                        CHANNELS,
+                        path,
+                    )
+                    return None
+
+            return pcm
     except Exception:  # noqa: BLE001
         _LOGGER.warning("Could not load sound file: %s", path)
         return None
@@ -193,6 +234,11 @@ class MetronomeState:
         self.beats_per_measure: int = 4
         self._beat_index: int = 0
         self.accent_enabled: bool = True
+        # Whether we've applied "startup overrides" at least once.
+        # The knob blueprint sends bpm/beats/sound on every press; we only want those
+        # to act as initial configuration, not overwrite the user's current tempo
+        # every time they toggle start/stop.
+        self._startup_overrides_applied: bool = False
 
         # Interaction mode
         self.mode: str = MODE_NORMAL
@@ -349,9 +395,15 @@ class MetronomeStreamView(HomeAssistantView):
         await response.write(_make_wav_header())
 
         try:
-            async for chunk in self._generate_audio():
+            async for chunk, duration_s in self._generate_audio():
                 await response.write(chunk)
-                await asyncio.sleep(0)  # yield between beats so service calls can run
+                # Pace the stream in real time.
+                # Without this, the server can run ahead and the media_player buffers
+                # minutes of audio, making BPM changes appear to lag.
+                if duration_s > 0:
+                    await asyncio.sleep(duration_s)
+                else:
+                    await asyncio.sleep(0)
         except (ConnectionResetError, asyncio.CancelledError):
             _LOGGER.debug("Stream client disconnected")
         except Exception:  # noqa: BLE001
@@ -360,13 +412,13 @@ class MetronomeStreamView(HomeAssistantView):
         return response
 
     async def _generate_audio(self):
-        silence_block = bytes(SAMPLE_RATE // 10 * BYTES_PER_FRAME)  # 100 ms
+        silence_frames = SAMPLE_RATE // 10  # 100 ms
+        silence_block = bytes(silence_frames * BYTES_PER_FRAME)
 
         while True:
             state: MetronomeState | None = self.hass.data.get(DOMAIN)
             if state is None or not state.playing:
-                yield silence_block
-                await asyncio.sleep(0.05)
+                yield silence_block, (silence_frames / SAMPLE_RATE)
                 continue
 
             bpm = state.bpm
@@ -381,7 +433,7 @@ class MetronomeStreamView(HomeAssistantView):
 
             click_frames = len(click) // BYTES_PER_FRAME
             silence_frames = max(0, beat_frames - click_frames)
-            yield click + bytes(silence_frames * BYTES_PER_FRAME)
+            yield (click + bytes(silence_frames * BYTES_PER_FRAME)), (beat_frames / SAMPLE_RATE)
 
 
 # ---------------------------------------------------------------------------
@@ -459,17 +511,27 @@ async def async_setup_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
     # Helpers for press service
     # ----------------------------------------------------------------
 
-    async def _do_start(media_player, bpm, beats_per_measure, sound, accent_enabled):
+    async def _do_start(
+        media_player,
+        bpm,
+        beats_per_measure,
+        sound,
+        accent_enabled,
+        *,
+        apply_startup_overrides: bool,
+    ):
         """Start the metronome and optionally play on a speaker."""
-        if bpm is not None:
-            state.set_bpm(bpm)
-        if beats_per_measure is not None:
-            state.beats_per_measure = max(1, beats_per_measure)
-            state.reset_beat()
-        if sound is not None:
-            await hass.async_add_executor_job(state.set_sound, sound)
-        if accent_enabled is not None:
-            state.accent_enabled = accent_enabled
+        if apply_startup_overrides and not state._startup_overrides_applied:
+            if bpm is not None:
+                state.set_bpm(bpm)
+            if beats_per_measure is not None:
+                state.beats_per_measure = max(1, beats_per_measure)
+                state.reset_beat()
+            if sound is not None:
+                await hass.async_add_executor_job(state.set_sound, sound)
+            if accent_enabled is not None:
+                state.accent_enabled = accent_enabled
+            state._startup_overrides_applied = True
         state.playing = True
         _publish_state()
 
@@ -550,7 +612,14 @@ async def async_setup_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
                 hass.async_create_task(_do_stop(media_player))
             else:
                 hass.async_create_task(
-                    _do_start(media_player, bpm, beats, sound, accent_enabled)
+                    _do_start(
+                        media_player,
+                        bpm,
+                        beats,
+                        sound,
+                        accent_enabled,
+                        apply_startup_overrides=True,
+                    )
                 )
 
         state._pending_single_tap = hass.loop.call_later(dtw, _fire_single_tap)
