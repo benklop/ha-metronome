@@ -54,5 +54,8 @@ ATTR_MEASURE_MODE_TIMEOUT_S = "measure_mode_timeout_s"
 # State entity id  (set via hass.states.async_set — no formal platform needed)
 STATE_ENTITY_ID = f"{DOMAIN}.metronome"
 
+# hass.data key: unsub callback for EVENT_HOMEASSISTANT_STOP (timer safety on shutdown)
+KEY_STOP_UNSUB = f"{DOMAIN}_stop_unsub"
+
 # HTTP stream path
 STREAM_PATH = f"/api/{DOMAIN}/stream"

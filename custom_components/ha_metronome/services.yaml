@@ -1,0 +1,196 @@
+# Service descriptions for Developer Tools & the automation editor.
+# Field names match the Python service schemas in __init__.py
+
+start:
+  name: Start
+  description: Start or resume metronome playback (stream continues; audio is no longer silence).
+
+stop:
+  name: Stop
+  description: Pause the metronome. The HTTP stream stays open and receives silence until you start again.
+
+set_bpm:
+  name: Set BPM
+  description: Set tempo and optionally time signature in one call.
+  fields:
+    bpm:
+      name: BPM
+      description: Beats per minute (20–300).
+      required: true
+      selector:
+        number:
+          min: 20
+          max: 300
+          step: 1
+          mode: box
+          unit_of_measurement: BPM
+    beats_per_measure:
+      name: Beats per measure
+      description: Optional. When set, beat counter resets to match the new bar length.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 16
+          step: 1
+          mode: box
+
+adjust_bpm:
+  name: Adjust BPM
+  description: Nudge tempo by a delta (default +1 BPM), clamped to 20–300.
+  fields:
+    delta:
+      name: Delta
+      description: BPM change (negative to slow down).
+      required: false
+      default: 1
+      selector:
+        number:
+          mode: box
+
+set_sound:
+  name: Set sound
+  description: Load a click sound set from config/sounds/Metronomes (name without _hi/_lo suffix).
+  fields:
+    sound:
+      name: Sound
+      description: Sound set name.
+      required: true
+      selector:
+        text:
+
+play_on:
+  name: Play on media player
+  description: Configure the metronome, start playback, and open the stream URL on a media player.
+  fields:
+    media_player:
+      name: Media player
+      description: Entity to receive the click-track stream.
+      required: false
+      selector:
+        entity:
+          domain: media_player
+    bpm:
+      name: BPM
+      required: false
+      selector:
+        number:
+          min: 20
+          max: 300
+          step: 1
+          unit_of_measurement: BPM
+    beats_per_measure:
+      name: Beats per measure
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 16
+          step: 1
+    sound:
+      name: Sound
+      required: false
+      selector:
+        text:
+    accent_enabled:
+      name: Accent beat one
+      description: Use the accent (_hi) sample on the first beat of each measure.
+      required: false
+      selector:
+        boolean:
+
+press:
+  name: Press (knob)
+  description: Handle a physical or virtual press. Single-tap toggles start/stop after the double-tap window; a second tap in that window enters beats-per-measure mode. In that mode, the next press exits.
+  fields:
+    media_player:
+      name: Media player
+      description: Used with start to call play_media on this entity; used with stop to call media_stop.
+      required: false
+      selector:
+        entity:
+          domain: media_player
+    bpm:
+      name: Initial BPM
+      description: Used when a single-tap starts the metronome.
+      required: false
+      selector:
+        number:
+          min: 20
+          max: 300
+          step: 1
+          unit_of_measurement: BPM
+    beats_per_measure:
+      name: Beats per measure
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 16
+          step: 1
+    sound:
+      name: Click sound
+      required: false
+      selector:
+        text:
+    accent_enabled:
+      name: Accent beat one
+      required: false
+      selector:
+        boolean:
+    double_tap_window_ms:
+      name: Double-tap window
+      description: If a second press arrives within this many milliseconds, it counts as a double-tap (enter measure mode).
+      required: false
+      selector:
+        number:
+          min: 100
+          max: 1000
+          step: 10
+          unit_of_measurement: ms
+    measure_mode_timeout_s:
+      name: Measure mode timeout
+      description: In beats-per-measure mode, exit automatically after this many seconds without rotation.
+      required: false
+      selector:
+        number:
+          min: 2
+          max: 30
+          step: 1
+          unit_of_measurement: s
+
+rotate:
+  name: Rotate (knob)
+  description: In normal mode, changes BPM. In adjust_measure mode (after a double-press), changes beats per measure and resets the inactivity timeout.
+  fields:
+    direction:
+      name: Direction
+      description: Clockwise (increase) or counter-clockwise (decrease).
+      required: true
+      selector:
+        select:
+          options:
+            - value: 1
+              label: Clockwise (increase)
+            - value: -1
+              label: Counter-clockwise (decrease)
+    bpm_step:
+      name: BPM per step
+      description: BPM change per rotation when in normal mode.
+      required: false
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 20
+          step: 1
+    measure_mode_timeout_s:
+      name: Measure mode timeout
+      description: When already in measure mode, this value is used if you want to change the inactivity period (seconds).
+      required: false
+      selector:
+        number:
+          min: 2
+          max: 30
+          step: 1
+          unit_of_measurement: s

@@ -65,7 +65,8 @@ import voluptuous as vol
 from aiohttp import web
 
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 from homeassistant.helpers.typing import ConfigType
@@ -91,6 +92,7 @@ from .const import (
     DEFAULT_SOUND,
     DEFAULT_SOUNDS_SUBDIR,
     DOMAIN,
+    KEY_STOP_UNSUB,
     MAX_BPM,
     MIN_BPM,
     MODE_ADJUST_MEASURE,
@@ -672,12 +674,26 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         }),
     )
 
+    @callback
+    def _on_hass_stop(_event: Event) -> None:
+        """Cancel deferred tap/measure timers so call_later does not run during shutdown."""
+        s = hass.data.get(DOMAIN)
+        if isinstance(s, MetronomeState):
+            s.cancel_interaction_timers()
+
+    hass.data[KEY_STOP_UNSUB] = hass.bus.async_listen(
+        EVENT_HOMEASSISTANT_STOP, _on_hass_stop
+    )
+
     _LOGGER.info("HA Metronome ready — %d sounds, stream at %s", len(available_sounds), stream_url)
     return True
 
 
 async def async_unload(hass: HomeAssistant) -> bool:
     """Tear down services, state, and any pending loop timers (reload or shutdown)."""
+
+    if unsub := hass.data.pop(KEY_STOP_UNSUB, None):
+        unsub()
 
     state = hass.data.get(DOMAIN)
     if state is None:

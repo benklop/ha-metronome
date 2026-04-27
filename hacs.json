@@ -1,0 +1,5 @@
+{
+  "name": "HA Metronome",
+  "render_readme": true,
+  "homeassistant": "2022.4.0"
+}
