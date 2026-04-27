@@ -45,6 +45,29 @@ The blueprint at `blueprints/automation/ha_metronome/metronome_knob_zha.yaml` ca
 
 Some Tuya scene knobs (e.g. C3006) send several `zha_event` types per detent; the blueprint has **React to step / left&right / rotate_type** toggles so you only handle one. A chronological example from a real device is in [`zha_event.yaml`](zha_event.yaml) at the repository root.
 
+The blueprint trigger uses **`device_ieee`** (copy from any `zha_event`), not the UI device picker’s registry id — that lines up with ZHA’s own automations and avoids “events in the log but no automation trace.”
+
+### Troubleshooting: no rotation, empty automation trace
+
+A **metronome** automation trace only records a run when its **trigger** runs. This blueprint’s trigger matches `zha_event` on **`device_ieee`** (the Zigbee hardware address in every event, e.g. in [`zha_event.yaml`](zha_event.yaml)). That matches how **ZHA’s own device automations** subscribe to events; filtering only on registry `device_id` can fail to match even when `zha_event` appears in the log (so you see events but **no** automation trace). Paste **Zigbee device IEEE** from the event **exactly** (lowercase hex, colons).
+
+Work through this in order:
+
+1. **Confirm events exist (not the metronome yet)**  
+   **Developer tools → Events → Start listening**, event type **`zha_event`**, leave the optional payload **empty** so you see everything. Turn the knob. If you never see `left`, `right`, `step`, or `rotate_type` for this node, the problem is **ZHA / device / mode**, not the blueprint. Some Tuya knobs need **dimmer vs scene** mode (or a long-press / attribute change) so rotation is emitted. Search for your model in [ZHA device handlers](https://github.com/zigpy/zha-device-handlers) and check a **quirk** is applied.
+
+2. **Same `device_ieee` as in the `zha_event` line**  
+   In the automation from this blueprint, the field **Zigbee device IEEE** must equal `data.device_ieee` from a real `zha_event` for that knob (see [`zha_event.yaml`](zha_event.yaml)). Do not rely on a generic device picker alone — use the value from the log.
+
+3. **React to …**  
+   At least one of **React to step** / **left&right** / **rotate_type** must be **on** for a rotation you actually get. If all three are off, the automation can trigger (press) but the **choose** block will never call `ha_metronome.rotate` on turn.
+
+4. **Diagnostic automation**  
+   The file [`examples/diagnostics_zha_knob_event.yaml`](examples/diagnostics_zha_knob_event.yaml) notifies on every `zha_event` for one **`device_ieee`**. If that fires on **press** but never on **rotate**, rotation is not reaching ZHA. If it never fires, the **IEEE** string is wrong or there are no events from the node.
+
+5. **Range / power**  
+   Low battery, weak link, or **wake** the device (e.g. one press) before slow turns.
+
 ## Features (short)
 
 - HTTP WAV stream: `/api/ha_metronome/stream`

@@ -39,14 +39,20 @@ blueprint:
 
     **Reference trace** in this repository: `zha_event.yaml` — on one detent, `left` and `rotate_type` (OnOff, cluster 6) arrive in the same millisecond, then `step` (Level, cluster 8) about **0.25s later**. Enable only **one** of the three; use `left`/`right` or `rotate_type` for snappy control, or `step` alone if you want a single level-cluster event (slight lag).
 
+    **Trigger field: `device_ieee` (Zigbee IEEE), not only the registry `device_id`**  
+    ZHA’s own device automations match `zha_event` using the device’s **IEEE** address. This blueprint does the same: the trigger uses `device_ieee` so it stays consistent with what ZHA emits. Copy the value from any `zha_event` (or from this repo’s `zha_event.yaml`) — same format as in the log (lowercase hex, colons).
+
   domain: automation
 
   input:
-    knob_device:
-      name: Knob Device (ZHA)
+    zha_device_ieee:
+      name: Zigbee device IEEE
+      description: >
+        Hardware address used in `zha_event` (field `device_ieee`). Paste from Developer Tools → Events
+        when listening to `zha_event`, or from the device / `zha_event.yaml`. Example: a4:c1:38:48:77:3e:71:6e
+      default: ""
       selector:
-        device:
-          integration: zha
+        text:
 
     media_player:
       name: Media Player
@@ -285,15 +291,16 @@ blueprint:
 # ---------------------------------------------------------------------------
 # Triggers
 # ---------------------------------------------------------------------------
-# One trigger for the whole device: every ZHA event (press + all rotation command variants).
-# Which commands actually call rotate is gated in `action` by the react_to_* inputs.
+# One trigger: every `zha_event` for this Zigbee node. ZHA’s device automation layer matches
+# `device_ieee` (not only registry `device_id`); that avoids silent mismatch with the device picker.
+# Which commands call rotate is gated in `action` by the react_to_* inputs.
 # ---------------------------------------------------------------------------
 trigger:
   - id: zha_knob
     platform: event
     event_type: zha_event
     event_data:
-      device_id: !input knob_device
+      device_ieee: !input zha_device_ieee
 
 # ---------------------------------------------------------------------------
 # Variables

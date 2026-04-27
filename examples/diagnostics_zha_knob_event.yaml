@@ -1,0 +1,24 @@
+# Copy into configuration (e.g. automations.yaml) or create via UI: Settings → Automations
+# 1) Replace YOUR_IEEE with `device_ieee` from any `zha_event` for the knob (Developer Tools).
+# 2) Save, then act on the device. You should get a notification per matching event.
+# 3) This matches how ZHA’s device triggers filter on `device_ieee`, same as the metronome blueprint.
+
+alias: "Diagnostics – ZHA knob (all events for one IEEE)"
+description: "Temporary helper for HA Metronome: same filter as the knob blueprint. Delete when done."
+mode: parallel
+max: 20
+
+trigger:
+  - platform: event
+    event_type: zha_event
+    event_data:
+      device_ieee: "YOUR_IEEE"
+
+action:
+  - service: persistent_notification.create
+    data:
+      title: "ZHA knob event"
+      message: |
+        command={{ trigger.event.data.get('command', 'N/A') }}
+        cluster={{ trigger.event.data.get('cluster_id', 'N/A') }}
+        {{ trigger.event.data }}

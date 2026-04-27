@@ -9,6 +9,10 @@
 # rotate_type for the lowest latency; `step` alone works but is delayed.
 #
 # (IDs / IEEE in this file are from a real device; replace with your own when testing.)
+#
+# If you get no `zha_event` when rotating, see "Troubleshooting" (README) and
+# `examples/diagnostics_zha_knob_event.yaml`. The metronome blueprint trigger matches
+# `device_ieee` (field below), same as ZHA’s built-in device automations.
 #---------------------------------------------------------------------------------------------------
 # --- 1) left (earliest) ---------------------------------------------------------------------------
 event_type: zha_event
