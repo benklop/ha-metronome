@@ -42,6 +42,7 @@ SERVICE_SET_SOUND = "set_sound"
 SERVICE_PRESS = "press"     # toggles start/stop immediately
 SERVICE_ENTER_MEASURE_MODE = "enter_measure_mode"
 SERVICE_ROTATE = "rotate"   # adjusts BPM or beats depending on mode
+SERVICE_RESET_TO_DEFAULTS = "reset_to_defaults"
 
 # Service data keys
 ATTR_BPM = "bpm"

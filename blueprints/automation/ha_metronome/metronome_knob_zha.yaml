@@ -5,10 +5,14 @@ blueprint:
 
     - `command: remote_button_short_press` for a press
     - `command: remote_button_double_press` for a double-press
+    - `command: remote_button_long_press` for a long press (reset to defaults)
     - `command: left` / `right` for rotation
 
     **Press** toggles start/stop (and starts streaming to the chosen media player).
+    Short presses pass a **double-tap window** to the integration so the first tap of a
+    double-press does not stop playback before double-press enters beats-per-measure mode.
     **Double-press** enters beats-per-measure adjustment mode.
+    **Long press** resets BPM, meter, sound, and accent to the blueprint defaults.
     **Rotate** adjusts tempo (or beats-per-measure when the component is in that mode).
 
     If your device uses different command names, this simplified blueprint will not match them.
@@ -146,8 +150,10 @@ blueprint:
     double_tap_window_ms:
       name: Double-tap window (ms)
       description: >
-        Maximum gap between two presses to count as a double-tap.
-        Shorter = less chance of accidental double-taps; longer = easier to trigger.
+        Passed to the integration on each short press. While the metronome is playing,
+        a stop is deferred by this many milliseconds so a quick double-press can enter
+        beats-per-measure mode without the first tap silencing the click. Set to 0 to
+        stop immediately on every short press (legacy behavior).
       default: 400
       selector:
         number:
@@ -217,6 +223,7 @@ action:
             sound: !input click_sound
             accent_enabled: !input accent_enabled
             measure_mode_timeout_s: !input measure_mode_timeout_s
+            double_tap_window_ms: !input double_tap_window_ms
 
     # ---- DOUBLE-PRESS: enter beats-per-measure adjustment mode -------------
     - conditions:
@@ -227,6 +234,20 @@ action:
         - service: ha_metronome.enter_measure_mode
           data:
             measure_mode_timeout_s: !input measure_mode_timeout_s
+
+    # ---- LONG-PRESS: reset to blueprint defaults -------------------------
+    - conditions:
+        - condition: template
+          value_template: >
+            {{ trigger.event.data.get('command') | string | lower == 'remote_button_long_press' }}
+      sequence:
+        - service: ha_metronome.reset_to_defaults
+          data:
+            media_player: !input media_player
+            bpm: !input initial_bpm
+            beats_per_measure: !input beats_per_measure
+            sound: !input click_sound
+            accent_enabled: !input accent_enabled
 
     # ---- ROTATE: `left` / `right` ----------------------------------------
     - conditions:
