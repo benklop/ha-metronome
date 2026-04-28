@@ -13,18 +13,22 @@ emerges naturally from the audio data — no polling, no scheduling jitter.
 
 Double-tap and mode management
 -------------------------------
-Rather than dealing with YAML automation timing quirks, the component handles
-all tap semantics internally:
+Rather than dealing with YAML automation timing quirks, the component can defer
+a stop when the blueprint passes ``double_tap_window_ms`` on ``press``: the
+first tap of a double-press sequence does not stop playback until the window
+expires, so a following ``enter_measure_mode`` (double-press) keeps the click
+audible while you change time signature.
 
-  - Single tap  →  toggle start/stop (with configurable delay to distinguish)
-  - Double tap  →  enter "adjust_measure" mode
+  - Single tap  →  toggle start/stop (deferred stop when ``double_tap_window_ms`` is set)
+  - Double tap  →  enter "adjust_measure" mode (via ``enter_measure_mode``; cancels deferred stop)
   - In adjust_measure: rotating changes beats_per_measure instead of BPM
-  - adjust_measure exits automatically after a configurable timeout, or on any press
+  - adjust_measure exits automatically after a configurable timeout
 
 Services exposed to blueprints
 --------------------------------
-  ha_metronome.press    — call this on every knob press;  handles single/double-tap
-  ha_metronome.rotate   — call this on every rotation;  adjusts BPM or beats per mode
+  ha_metronome.press    — call on short press; optional deferred stop for double-tap devices
+  ha_metronome.rotate   — call on rotation; adjusts BPM or beats per mode
+  ha_metronome.reset_to_defaults — restore BPM, meter, sound, accent (e.g. long-press on knob)
 
 Direct control services (also usable from dashboards / scripts)
 ---------------------------------------------------------------
@@ -81,6 +85,7 @@ from .const import (
     ATTR_BPM_STEP,
     ATTR_DELTA,
     ATTR_DIRECTION,
+    ATTR_DOUBLE_TAP_WINDOW_MS,
     ATTR_MEASURE_MODE_TIMEOUT_S,
     ATTR_MEDIA_PLAYER,
     ATTR_SOUND,
@@ -104,6 +109,7 @@ from .const import (
     SERVICE_ENTER_MEASURE_MODE,
     SERVICE_PLAY_ON,
     SERVICE_PRESS,
+    SERVICE_RESET_TO_DEFAULTS,
     SERVICE_ROTATE,
     SERVICE_SET_BPM,
     SERVICE_SET_SOUND,
@@ -242,6 +248,7 @@ class MetronomeState:
         # Interaction mode
         self.mode: str = MODE_NORMAL
         self._measure_exit_handle: Optional[asyncio.TimerHandle] = None
+        self._pending_stop_handle: Optional[asyncio.TimerHandle] = None
         self.measure_timeout: float = DEFAULT_MEASURE_MODE_TIMEOUT_S
 
         # Sounds
@@ -349,8 +356,15 @@ class MetronomeState:
             self._measure_exit_handle.cancel()
             self._measure_exit_handle = None
 
+    def cancel_pending_stop(self) -> None:
+        """Cancel a deferred stop scheduled after a short press (double-tap window)."""
+        if self._pending_stop_handle is not None:
+            self._pending_stop_handle.cancel()
+            self._pending_stop_handle = None
+
     def cancel_interaction_timers(self) -> None:
         """Cancel any loop timers (reload/shutdown)."""
+        self.cancel_pending_stop()
         self._cancel_measure_timer()
         if self.mode == MODE_ADJUST_MEASURE:
             self.mode = MODE_NORMAL
@@ -556,11 +570,9 @@ async def async_setup_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
     # ----------------------------------------------------------------
     # Service: press
     #
-    # Press: toggle start / stop immediately
-    #
-    # Note: some earlier versions implemented "double-tap to enter measure mode"
-    # here. Modern ZHA knobs typically provide an explicit double-press command,
-    # so measure mode is now entered via a dedicated service.
+    # Press toggles start/stop. When ``double_tap_window_ms`` is set and playback
+    # is on, stop is deferred so a quick following double-press can enter measure
+    # mode without silencing the metronome first.
     # ----------------------------------------------------------------
 
     async def handle_press(call: ServiceCall) -> None:
@@ -571,10 +583,29 @@ async def async_setup_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
         sound           = call.data.get(ATTR_SOUND)
         accent_enabled  = call.data.get(ATTR_ACCENT_ENABLED)
         # measure_mode_timeout_s is accepted for backwards compatibility but not used here.
+        double_ms = call.data.get(ATTR_DOUBLE_TAP_WINDOW_MS)
 
         if state.playing:
-            await _do_stop(media_player)
+            if double_ms is not None and int(double_ms) > 0:
+                state.cancel_pending_stop()
+
+                async def _deferred_stop() -> None:
+                    state._pending_stop_handle = None
+                    if not state.playing:
+                        return
+                    await _do_stop(media_player)
+                    _publish_state()
+
+                delay_s = max(0.001, int(double_ms) / 1000.0)
+                state._pending_stop_handle = hass.loop.call_later(
+                    delay_s,
+                    lambda: hass.async_create_task(_deferred_stop()),
+                )
+                _publish_state()
+            else:
+                await _do_stop(media_player)
         else:
+            state.cancel_pending_stop()
             await _do_start(
                 media_player,
                 bpm,
@@ -585,12 +616,62 @@ async def async_setup_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
             )
 
     async def handle_enter_measure_mode(call: ServiceCall) -> None:
+        state.cancel_pending_stop()
         timeout = float(
             call.data.get(ATTR_MEASURE_MODE_TIMEOUT_S, DEFAULT_MEASURE_MODE_TIMEOUT_S)
         )
         if state.mode != MODE_ADJUST_MEASURE:
             state.enter_measure_mode(timeout, hass.loop, _on_measure_mode_exit)
             _publish_state()
+
+    async def handle_reset_to_defaults(call: ServiceCall) -> None:
+        """Restore tempo, meter, sound, and accent; exit measure mode; clear deferred stop."""
+        state.cancel_pending_stop()
+        state.cancel_interaction_timers()
+        state._startup_overrides_applied = False
+
+        if ATTR_BPM in call.data:
+            state.set_bpm(int(call.data[ATTR_BPM]))
+        else:
+            state.set_bpm(DEFAULT_BPM)
+
+        if ATTR_BEATS_PER_MEASURE in call.data:
+            state.beats_per_measure = max(1, int(call.data[ATTR_BEATS_PER_MEASURE]))
+        else:
+            state.beats_per_measure = 4
+
+        state.reset_beat()
+
+        sound = call.data.get(ATTR_SOUND)
+        if sound:
+            await hass.async_add_executor_job(state.set_sound, sound)
+        else:
+            fallback = (
+                DEFAULT_SOUND
+                if DEFAULT_SOUND in state.available_sounds
+                else (state.available_sounds[0] if state.available_sounds else None)
+            )
+            if fallback:
+                await hass.async_add_executor_job(state.set_sound, fallback)
+
+        if ATTR_ACCENT_ENABLED in call.data:
+            state.accent_enabled = bool(call.data[ATTR_ACCENT_ENABLED])
+        else:
+            state.accent_enabled = True
+
+        media_player = call.data.get(ATTR_MEDIA_PLAYER)
+        if state.playing and media_player:
+            await hass.services.async_call(
+                "media_player",
+                "play_media",
+                {
+                    "entity_id": media_player,
+                    "media_content_id": stream_url,
+                    "media_content_type": "music",
+                },
+                blocking=False,
+            )
+        _publish_state()
 
     # ----------------------------------------------------------------
     # Service: rotate
@@ -600,6 +681,7 @@ async def async_setup_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
     # ----------------------------------------------------------------
 
     async def handle_rotate(call: ServiceCall) -> None:
+        state.cancel_pending_stop()
         direction = int(call.data.get(ATTR_DIRECTION, 1))   # +1 or -1
         bpm_step  = int(call.data.get(ATTR_BPM_STEP, DEFAULT_BPM_STEP))
         mto = call.data.get(ATTR_MEASURE_MODE_TIMEOUT_S, state.measure_timeout)
@@ -620,6 +702,7 @@ async def async_setup_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
     # ----------------------------------------------------------------
 
     async def handle_start(_call: ServiceCall) -> None:
+        state.cancel_pending_stop()
         state.playing = True
         _publish_state()
 
@@ -716,6 +799,7 @@ async def async_setup_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
             vol.Optional(ATTR_SOUND): cv.string,
             vol.Optional(ATTR_ACCENT_ENABLED): _bool,
             vol.Optional(ATTR_MEASURE_MODE_TIMEOUT_S): vol.All(vol.Coerce(float), vol.Range(2, 30)),
+            vol.Optional(ATTR_DOUBLE_TAP_WINDOW_MS): vol.All(vol.Coerce(int), vol.Range(0, 2000)),
         }),
     )
     hass.services.async_register(
@@ -724,6 +808,16 @@ async def async_setup_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
             vol.Optional(ATTR_MEASURE_MODE_TIMEOUT_S, default=DEFAULT_MEASURE_MODE_TIMEOUT_S): vol.All(
                 vol.Coerce(float), vol.Range(2, 30)
             ),
+        }),
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_RESET_TO_DEFAULTS, handle_reset_to_defaults,
+        schema=vol.Schema({
+            vol.Optional(ATTR_BPM): vol.All(vol.Coerce(int), vol.Range(MIN_BPM, MAX_BPM)),
+            vol.Optional(ATTR_BEATS_PER_MEASURE): vol.All(vol.Coerce(int), vol.Range(1, 16)),
+            vol.Optional(ATTR_SOUND): cv.string,
+            vol.Optional(ATTR_ACCENT_ENABLED): _bool,
+            vol.Optional(ATTR_MEDIA_PLAYER): cv.entity_id,
         }),
     )
     hass.services.async_register(
@@ -771,6 +865,8 @@ async def async_unload_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
         SERVICE_SET_SOUND,
         SERVICE_PLAY_ON,
         SERVICE_PRESS,
+        SERVICE_ENTER_MEASURE_MODE,
+        SERVICE_RESET_TO_DEFAULTS,
         SERVICE_ROTATE,
     ):
         hass.services.async_remove(DOMAIN, service)

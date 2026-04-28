@@ -101,7 +101,10 @@ play_on:
 
 press:
   name: Press (knob)
-  description: Handle a physical or virtual press. Toggles start/stop immediately. (Measure mode is entered via the enter_measure_mode service.)
+  description: >
+    Toggles start/stop. When double_tap_window_ms is set and playback is on, the stop
+    is delayed by that many milliseconds so a following enter_measure_mode (double-press)
+    can run without the first tap silencing the metronome.
   fields:
     media_player:
       name: Media player
@@ -148,6 +151,64 @@ press:
           max: 30
           step: 1
           unit_of_measurement: s
+    double_tap_window_ms:
+      name: Double-tap defer window (ms)
+      description: >
+        When playing, wait this long before stopping on press. Use with ZHA devices that
+        emit short_press before double_press. Omit or use 0 for immediate stop.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 2000
+          step: 50
+          unit_of_measurement: ms
+          mode: box
+
+reset_to_defaults:
+  name: Reset to defaults
+  description: >
+    Restore BPM, beats per measure, click sound, and accent; exit beats-per-measure mode;
+    cancel any deferred stop from press. Optionally re-issue play_media if the metronome
+    is already playing (e.g. after changing sound).
+  fields:
+    bpm:
+      name: BPM
+      description: Target tempo after reset (defaults to integration default 120 if omitted).
+      required: false
+      selector:
+        number:
+          min: 20
+          max: 300
+          step: 1
+          mode: box
+          unit_of_measurement: BPM
+    beats_per_measure:
+      name: Beats per measure
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 16
+          step: 1
+          mode: box
+    sound:
+      name: Click sound
+      required: false
+      selector:
+        text:
+    accent_enabled:
+      name: Accent beat one
+      required: false
+      selector:
+        boolean:
+    media_player:
+      name: Media player
+      description: When playing, call play_media again so a sound change takes effect on the stream.
+      required: false
+      selector:
+        entity:
+          domain: media_player
 
 rotate:
   name: Rotate (knob)
