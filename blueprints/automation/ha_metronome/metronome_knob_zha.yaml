@@ -4,10 +4,12 @@ blueprint:
     Control the HA Metronome custom component with a ZHA knob/remote that emits:
 
     - `command: remote_button_short_press` for a press
+    - `command: remote_button_long_press` for a long-press
     - `command: remote_button_double_press` for a double-press
     - `command: left` / `right` for rotation
 
     **Press** toggles start/stop (and starts streaming to the chosen media player).
+    **Long-press** resets to beat 1, restores the blueprint initial BPM / beats per measure / sound / accent, and exits beats-per-measure mode if active.
     **Double-press** enters beats-per-measure adjustment mode.
     **Rotate** adjusts tempo (or beats-per-measure when the component is in that mode).
 
@@ -143,6 +145,19 @@ blueprint:
           step: 1
           mode: box
 
+    beats_per_measure_step:
+      name: Beats-per-measure change per rotation
+      description: >
+        How many beats to add/subtract per turn when in beats-per-measure adjustment mode
+        (after a double-press).
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 16
+          step: 1
+          mode: box
+
     double_tap_window_ms:
       name: Double-tap window (ms)
       description: >
@@ -218,6 +233,19 @@ action:
             accent_enabled: !input accent_enabled
             measure_mode_timeout_s: !input measure_mode_timeout_s
 
+    # ---- LONG-PRESS: reset to beat 1, exit measure mode --------------------
+    - conditions:
+        - condition: template
+          value_template: >
+            {{ trigger.event.data.get('command') | string | lower == 'remote_button_long_press' }}
+      sequence:
+        - service: ha_metronome.reset
+          data:
+            bpm: !input initial_bpm
+            beats_per_measure: !input beats_per_measure
+            sound: !input click_sound
+            accent_enabled: !input accent_enabled
+
     # ---- DOUBLE-PRESS: enter beats-per-measure adjustment mode -------------
     - conditions:
         - condition: template
@@ -246,6 +274,7 @@ action:
           data:
             direction: "{{ direction | int(0) }}"
             bpm_step: !input bpm_step
+            beats_step: !input beats_per_measure_step
             measure_mode_timeout_s: !input measure_mode_timeout_s
 
 # queued so rapid rotation events don't get dropped

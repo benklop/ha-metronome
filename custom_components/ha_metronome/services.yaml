@@ -172,6 +172,16 @@ rotate:
           min: 1
           max: 20
           step: 1
+    beats_step:
+      name: Beats per measure per step
+      description: Beats-per-measure change per rotation when in adjust_measure mode.
+      required: false
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 16
+          step: 1
     measure_mode_timeout_s:
       name: Measure mode timeout
       description: When already in measure mode, this value is used if you want to change the inactivity period (seconds).
@@ -182,6 +192,44 @@ rotate:
           max: 30
           step: 1
           unit_of_measurement: s
+
+reset:
+  name: Reset (knob long-press)
+  description: >
+    Move to beat 1 and exit beats-per-measure adjustment mode if active.
+    Pass the same BPM, beats per measure, sound, and accent fields your automation uses for press
+    (e.g. blueprint defaults) to restore those; any field omitted is left unchanged unless you
+    call reset with no fields at all — then BPM and beats per measure revert to the integration
+    built-in defaults.
+  fields:
+    bpm:
+      name: BPM
+      description: Restores tempo to this value (e.g. blueprint initial BPM).
+      required: false
+      selector:
+        number:
+          min: 20
+          max: 300
+          step: 1
+          unit_of_measurement: BPM
+    beats_per_measure:
+      name: Beats per measure
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 16
+          step: 1
+    sound:
+      name: Click sound
+      required: false
+      selector:
+        text:
+    accent_enabled:
+      name: Accent beat one
+      required: false
+      selector:
+        boolean:
 
 enter_measure_mode:
   name: Enter beats-per-measure mode

@@ -16,6 +16,9 @@ DEFAULT_BPM = 120
 MIN_BPM = 20
 MAX_BPM = 300
 
+# Time signature (numerator only; this integration does not model the denominator)
+DEFAULT_BEATS_PER_MEASURE = 4
+
 # Default sound set (name without _hi/_lo.wav suffix)
 DEFAULT_SOUND = "Perc_MetronomeQuartz"
 
@@ -26,6 +29,7 @@ DEFAULT_SOUNDS_SUBDIR = "sounds/Metronomes"
 DEFAULT_DOUBLE_TAP_WINDOW_MS = 400   # two taps within this → double-tap
 DEFAULT_MEASURE_MODE_TIMEOUT_S = 5   # seconds before measure-mode auto-exits
 DEFAULT_BPM_STEP = 2                 # BPM change per rotation step
+DEFAULT_BEATS_PER_MEASURE_STEP = 1   # beats-per-measure change per rotation in adjust_measure mode
 
 # Mode values (stored in state attribute)
 MODE_NORMAL = "normal"
@@ -41,6 +45,7 @@ SERVICE_SET_SOUND = "set_sound"
 # Knob-oriented services (used by blueprint)
 SERVICE_PRESS = "press"     # toggles start/stop immediately
 SERVICE_ENTER_MEASURE_MODE = "enter_measure_mode"
+SERVICE_RESET = "reset"     # beat back to 1; exits measure-adjust mode
 SERVICE_ROTATE = "rotate"   # adjusts BPM or beats depending on mode
 
 # Service data keys
@@ -52,6 +57,7 @@ ATTR_SOUND = "sound"
 ATTR_ACCENT_ENABLED = "accent_enabled"
 ATTR_DIRECTION = "direction"          # +1 (CW) or -1 (CCW)
 ATTR_BPM_STEP = "bpm_step"
+ATTR_BEATS_STEP = "beats_step"        # adjust_measure mode only
 ATTR_DOUBLE_TAP_WINDOW_MS = "double_tap_window_ms"
 ATTR_MEASURE_MODE_TIMEOUT_S = "measure_mode_timeout_s"
 

@@ -23,7 +23,8 @@ all tap semantics internally:
 
 Services exposed to blueprints
 --------------------------------
-  ha_metronome.press    — call this on every knob press;  handles single/double-tap
+  ha_metronome.press    — toggle start/stop
+  ha_metronome.reset    — long-press: beat 1, optional blueprint defaults (BPM, beats, sound, accent)
   ha_metronome.rotate   — call this on every rotation;  adjusts BPM or beats per mode
 
 Direct control services (also usable from dashboards / scripts)
@@ -77,6 +78,7 @@ from homeassistant.helpers.typing import ConfigType
 from .const import (
     ATTR_ACCENT_ENABLED,
     ATTR_BEATS_PER_MEASURE,
+    ATTR_BEATS_STEP,
     ATTR_BPM,
     ATTR_BPM_STEP,
     ATTR_DELTA,
@@ -87,6 +89,8 @@ from .const import (
     BITS_PER_SAMPLE,
     BYTES_PER_FRAME,
     CHANNELS,
+    DEFAULT_BEATS_PER_MEASURE,
+    DEFAULT_BEATS_PER_MEASURE_STEP,
     DEFAULT_BPM,
     DEFAULT_BPM_STEP,
     DEFAULT_MEASURE_MODE_TIMEOUT_S,
@@ -104,6 +108,7 @@ from .const import (
     SERVICE_ENTER_MEASURE_MODE,
     SERVICE_PLAY_ON,
     SERVICE_PRESS,
+    SERVICE_RESET,
     SERVICE_ROTATE,
     SERVICE_SET_BPM,
     SERVICE_SET_SOUND,
@@ -230,7 +235,7 @@ class MetronomeState:
         # Playback
         self.playing: bool = False
         self.bpm: int = DEFAULT_BPM
-        self.beats_per_measure: int = 4
+        self.beats_per_measure: int = DEFAULT_BEATS_PER_MEASURE
         self._beat_index: int = 0
         self.accent_enabled: bool = True
         # Whether we've applied "startup overrides" at least once.
@@ -592,20 +597,48 @@ async def async_setup_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
             state.enter_measure_mode(timeout, hass.loop, _on_measure_mode_exit)
             _publish_state()
 
+    async def handle_reset(call: ServiceCall) -> None:
+        """Beat 1; exit measure-adjust mode; restore optional fields (blueprint defaults).
+
+        When ``call.data`` is empty, BPM and beats/measure fall back to integration defaults.
+        Sound and accent are only changed if passed explicitly.
+        """
+        if state.mode == MODE_ADJUST_MEASURE:
+            state.exit_measure_mode()
+
+        empty = not call.data
+        if ATTR_BPM in call.data:
+            state.set_bpm(int(call.data[ATTR_BPM]))
+        elif empty:
+            state.set_bpm(DEFAULT_BPM)
+
+        if ATTR_BEATS_PER_MEASURE in call.data:
+            state.beats_per_measure = max(1, min(16, int(call.data[ATTR_BEATS_PER_MEASURE])))
+        elif empty:
+            state.beats_per_measure = max(1, min(16, DEFAULT_BEATS_PER_MEASURE))
+
+        if ATTR_SOUND in call.data:
+            await hass.async_add_executor_job(state.set_sound, call.data[ATTR_SOUND])
+        if ATTR_ACCENT_ENABLED in call.data:
+            state.accent_enabled = bool(call.data[ATTR_ACCENT_ENABLED])
+
+        state.reset_beat()
+        _publish_state()
+
     # ----------------------------------------------------------------
     # Service: rotate
     #
     # Normal mode:         adjust BPM by direction × bpm_step
-    # adjust_measure mode: adjust beats_per_measure by direction, reset timer
+    # adjust_measure mode: adjust beats_per_measure by direction × beats_step, reset timer
     # ----------------------------------------------------------------
 
     async def handle_rotate(call: ServiceCall) -> None:
         direction = int(call.data.get(ATTR_DIRECTION, 1))   # +1 or -1
         bpm_step  = int(call.data.get(ATTR_BPM_STEP, DEFAULT_BPM_STEP))
-        mto = call.data.get(ATTR_MEASURE_MODE_TIMEOUT_S, state.measure_timeout)
+        beats_step = int(call.data.get(ATTR_BEATS_STEP, DEFAULT_BEATS_PER_MEASURE_STEP))
 
         if state.mode == MODE_ADJUST_MEASURE:
-            new_beats = state.beats_per_measure + direction
+            new_beats = state.beats_per_measure + direction * beats_step
             state.beats_per_measure = max(1, min(16, new_beats))
             state.reset_beat()
             # Reset the auto-exit timer on each rotation
@@ -727,10 +760,22 @@ async def async_setup_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
         }),
     )
     hass.services.async_register(
+        DOMAIN, SERVICE_RESET, handle_reset,
+        schema=vol.Schema({
+            vol.Optional(ATTR_BPM): vol.All(vol.Coerce(int), vol.Range(MIN_BPM, MAX_BPM)),
+            vol.Optional(ATTR_BEATS_PER_MEASURE): vol.All(vol.Coerce(int), vol.Range(1, 16)),
+            vol.Optional(ATTR_SOUND): cv.string,
+            vol.Optional(ATTR_ACCENT_ENABLED): _bool,
+        }),
+    )
+    hass.services.async_register(
         DOMAIN, SERVICE_ROTATE, handle_rotate,
         schema=vol.Schema({
             vol.Required(ATTR_DIRECTION): vol.All(vol.Coerce(int), vol.In([-1, 1])),
             vol.Optional(ATTR_BPM_STEP, default=DEFAULT_BPM_STEP): vol.All(vol.Coerce(int), vol.Range(1, 20)),
+            vol.Optional(ATTR_BEATS_STEP, default=DEFAULT_BEATS_PER_MEASURE_STEP): vol.All(
+                vol.Coerce(int), vol.Range(1, 16)
+            ),
             vol.Optional(ATTR_MEASURE_MODE_TIMEOUT_S): vol.All(vol.Coerce(float), vol.Range(2, 30)),
         }),
     )
@@ -771,6 +816,8 @@ async def async_unload_entry(hass: HomeAssistant, _entry: ConfigEntry) -> bool:
         SERVICE_SET_SOUND,
         SERVICE_PLAY_ON,
         SERVICE_PRESS,
+        SERVICE_ENTER_MEASURE_MODE,
+        SERVICE_RESET,
         SERVICE_ROTATE,
     ):
         hass.services.async_remove(DOMAIN, service)
